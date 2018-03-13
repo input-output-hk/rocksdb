@@ -10,6 +10,8 @@
 #include <algorithm>
 #include <thread>
 #include <ctime>
+#include <locale>
+#include <codecvt>
 
 #include <errno.h>
 #include <process.h> // _getpid
@@ -58,7 +60,7 @@ void WinthreadCall(const char* label, std::error_code result) {
 
 namespace port {
 
-WinEnvIO::WinEnvIO(Env* hosted_env)
+WinEnvIO::WinEnvIO(WinEnv* hosted_env)
   :   hosted_env_(hosted_env),
       page_size_(4 * 1012),
       allocation_granularity_(page_size_),
@@ -90,8 +92,12 @@ WinEnvIO::~WinEnvIO() {
 
 Status WinEnvIO::DeleteFile(const std::string& fname) {
   Status result;
-
-  if (_unlink(fname.c_str())) {
+  
+  std::wstring wfname;
+  result = hosted_env_->convertToUtf16(fname, wfname);
+  if (!result.ok())
+    return result;
+  if (_wunlink(wfname.c_str())) {
     result = IOError("Failed to delete: " + fname, errno);
   }
 
@@ -115,14 +121,19 @@ Status WinEnvIO::NewSequentialFile(const std::string& fname,
 
   result->reset();
 
+  std::wstring wfname;
+  s = hosted_env_->convertToUtf16(fname, wfname);
+  if (!s.ok())
+    return s;
+
   // Corruption test needs to rename and delete files of these kind
   // while they are still open with another handle. For that reason we
   // allow share_write and delete(allows rename).
   HANDLE hFile = INVALID_HANDLE_VALUE;
   {
     IOSTATS_TIMER_GUARD(open_nanos);
-    hFile = CreateFileA(
-      fname.c_str(), GENERIC_READ,
+    hFile = CreateFileW(
+      wfname.c_str(), GENERIC_READ,
       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
       OPEN_EXISTING,  // Original fopen mode is "rb"
       FILE_ATTRIBUTE_NORMAL, NULL);
@@ -154,13 +165,18 @@ Status WinEnvIO::NewRandomAccessFile(const std::string& fname,
     fileFlags |= FILE_FLAG_RANDOM_ACCESS;
   }
 
+  std::wstring wfname;
+  s = hosted_env_->convertToUtf16(fname, wfname);
+  if (!s.ok())
+    return s;
+
   /// Shared access is necessary for corruption test to pass
   // almost all tests would work with a possible exception of fault_injection
   HANDLE hFile = 0;
   {
     IOSTATS_TIMER_GUARD(open_nanos);
     hFile =
-      CreateFileA(fname.c_str(), GENERIC_READ,
+      CreateFileW(wfname.c_str(), GENERIC_READ,
       FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
       NULL, OPEN_EXISTING, fileFlags, NULL);
   }
@@ -187,7 +203,7 @@ Status WinEnvIO::NewRandomAccessFile(const std::string& fname,
           "NewRandomAccessFile failed to map empty file: " + fname, EINVAL);
       }
 
-      HANDLE hMap = CreateFileMappingA(hFile, NULL, PAGE_READONLY,
+      HANDLE hMap = CreateFileMappingW(hFile, NULL, PAGE_READONLY,
         0,  // Whole file at its present length
         0,
         NULL);  // Mapping name
@@ -238,6 +254,11 @@ Status WinEnvIO::NewWritableFile(const std::string& fname,
   result->reset();
   Status s;
 
+  std::wstring wfname;
+  s = hosted_env_->convertToUtf16(fname, wfname);
+  if (!s.ok())
+    return s;
+  
   DWORD fileFlags = FILE_ATTRIBUTE_NORMAL;
 
   if (!local_options.use_os_buffer && !local_options.use_mmap_writes) {
@@ -263,8 +284,8 @@ Status WinEnvIO::NewWritableFile(const std::string& fname,
   HANDLE hFile = 0;
   {
     IOSTATS_TIMER_GUARD(open_nanos);
-    hFile = CreateFileA(
-      fname.c_str(),
+    hFile = CreateFileW(
+      wfname.c_str(),
       desired_access,  // Access desired
       shared_mode,
       NULL,           // Security attributes
@@ -309,13 +330,18 @@ Status WinEnvIO::NewRandomRWFile(const std::string & fname,
     file_flags |= FILE_FLAG_NO_BUFFERING;
   }
 
+  std::wstring wfname;
+  s = hosted_env_->convertToUtf16(fname, wfname);
+  if (!s.ok())
+    return s;
+  
   /// Shared access is necessary for corruption test to pass
   // almost all tests would work with a possible exception of fault_injection
   HANDLE hFile = 0;
   {
     IOSTATS_TIMER_GUARD(open_nanos);
     hFile =
-      CreateFileA(fname.c_str(),
+      CreateFileW(wfname.c_str(),
         desired_access,
         shared_mode,
         NULL, // Security attributes
@@ -355,7 +381,13 @@ Status WinEnvIO::NewDirectory(const std::string& name,
 Status WinEnvIO::FileExists(const std::string& fname) {
   // F_OK == 0
   const int F_OK_ = 0;
-  return _access(fname.c_str(), F_OK_) == 0 ? Status::OK()
+
+  std::wstring wfname;
+  Status s = hosted_env_->convertToUtf16(fname, wfname);
+  if (!s.ok())
+    return s;
+  
+  return _waccess(wfname.c_str(), F_OK_) == 0 ? Status::OK()
     : Status::NotFound();
 }
 
@@ -391,7 +423,12 @@ Status WinEnvIO::GetChildren(const std::string& dir,
 Status WinEnvIO::CreateDir(const std::string& name) {
   Status result;
 
-  if (_mkdir(name.c_str()) != 0) {
+  std::wstring wname;
+  result = hosted_env_->convertToUtf16(name, wname);
+  if (!result.ok())
+    return result;
+  
+  if (_wmkdir(wname.c_str()) != 0) {
     auto code = errno;
     result = IOError("Failed to create dir: " + name, code);
   }
@@ -402,11 +439,16 @@ Status WinEnvIO::CreateDir(const std::string& name) {
 Status  WinEnvIO::CreateDirIfMissing(const std::string& name) {
   Status result;
 
+  std::wstring wname;
+  result = hosted_env_->convertToUtf16(name, wname);
+  if (!result.ok())
+    return result;
+  
   if (DirExists(name)) {
     return result;
   }
 
-  if (_mkdir(name.c_str()) != 0) {
+  if (_wmkdir(wname.c_str()) != 0) {
     if (errno == EEXIST) {
       result =
         Status::IOError("`" + name + "' exists but is not a directory");
@@ -421,7 +463,12 @@ Status  WinEnvIO::CreateDirIfMissing(const std::string& name) {
 
 Status WinEnvIO::DeleteDir(const std::string& name) {
   Status result;
-  if (_rmdir(name.c_str()) != 0) {
+  std::wstring wname;
+  result = hosted_env_->convertToUtf16(name, wname);
+  if (!result.ok())
+    return result;
+  
+  if (_wrmdir(wname.c_str()) != 0) {
     auto code = errno;
     result = IOError("Failed to remove dir: " + name, code);
   }
@@ -432,8 +479,13 @@ Status WinEnvIO::GetFileSize(const std::string& fname,
   uint64_t* size) {
   Status s;
 
+  std::wstring wfname;
+  s = hosted_env_->convertToUtf16(fname, wfname);
+  if (!s.ok())
+    return s;
+  
   WIN32_FILE_ATTRIBUTE_DATA attrs;
-  if (GetFileAttributesExA(fname.c_str(), GetFileExInfoStandard, &attrs)) {
+  if (GetFileAttributesExW(wfname.c_str(), GetFileExInfoStandard, &attrs)) {
     ULARGE_INTEGER file_size;
     file_size.HighPart = attrs.nFileSizeHigh;
     file_size.LowPart = attrs.nFileSizeLow;
@@ -467,8 +519,13 @@ Status WinEnvIO::GetFileModificationTime(const std::string& fname,
   uint64_t* file_mtime) {
   Status s;
 
+  std::wstring wfname;
+  s = hosted_env_->convertToUtf16(fname, wfname);
+  if (!s.ok())
+    return s;
+  
   WIN32_FILE_ATTRIBUTE_DATA attrs;
-  if (GetFileAttributesExA(fname.c_str(), GetFileExInfoStandard, &attrs)) {
+  if (GetFileAttributesExW(wfname.c_str(), GetFileExInfoStandard, &attrs)) {
     *file_mtime = FileTimeToUnixTime(attrs.ftLastWriteTime);
   } else {
     auto lastError = GetLastError();
@@ -484,9 +541,17 @@ Status WinEnvIO::RenameFile(const std::string& src,
   const std::string& target) {
   Status result;
 
+  std::wstring wsrc, wtarget;
+  result = hosted_env_->convertToUtf16(src, wsrc);
+  if (!result.ok())
+    return result;
+  result = hosted_env_->convertToUtf16(target, wtarget);
+  if (!result.ok())
+    return result;
+
   // rename() is not capable of replacing the existing file as on Linux
   // so use OS API directly
-  if (!MoveFileExA(src.c_str(), target.c_str(), MOVEFILE_REPLACE_EXISTING)) {
+  if (!MoveFileExW(wsrc.c_str(), wtarget.c_str(), MOVEFILE_REPLACE_EXISTING)) {
     DWORD lastError = GetLastError();
 
     std::string text("Failed to rename: ");
@@ -502,7 +567,15 @@ Status WinEnvIO::LinkFile(const std::string& src,
   const std::string& target) {
   Status result;
 
-  if (!CreateHardLinkA(target.c_str(), src.c_str(), NULL)) {
+  std::wstring wsrc, wtarget;
+  result = hosted_env_->convertToUtf16(src, wsrc);
+  if (!result.ok())
+    return result;
+  result = hosted_env_->convertToUtf16(target, wtarget);
+  if (!result.ok())
+    return result;
+  
+  if (!CreateHardLinkW(wtarget.c_str(), wsrc.c_str(), NULL)) {
     DWORD lastError = GetLastError();
 
     std::string text("Failed to link: ");
@@ -521,6 +594,11 @@ Status  WinEnvIO::LockFile(const std::string& lockFname,
   *lock = NULL;
   Status result;
 
+  std::wstring wlockFname;
+  result = hosted_env_->convertToUtf16(lockFname, wlockFname);
+  if (!result.ok())
+    return result;
+
   // No-sharing, this is a LOCK file
   const DWORD ExclusiveAccessON = 0;
 
@@ -530,7 +608,7 @@ Status  WinEnvIO::LockFile(const std::string& lockFname,
   HANDLE hFile = 0;
   {
     IOSTATS_TIMER_GUARD(open_nanos);
-    hFile = CreateFileA(lockFname.c_str(), (GENERIC_READ | GENERIC_WRITE),
+    hFile = CreateFileW(wlockFname.c_str(), (GENERIC_READ | GENERIC_WRITE),
       ExclusiveAccessON, NULL, CREATE_ALWAYS,
       FILE_ATTRIBUTE_NORMAL, NULL);
   }
@@ -589,13 +667,18 @@ Status WinEnvIO::NewLogger(const std::string& fname,
   std::shared_ptr<Logger>* result) {
   Status s;
 
+  std::wstring wfname;
+  s = hosted_env_->convertToUtf16(fname, wfname);
+  if (!s.ok())
+    return s;
+  
   result->reset();
 
   HANDLE hFile = 0;
   {
     IOSTATS_TIMER_GUARD(open_nanos);
-    hFile = CreateFileA(
-      fname.c_str(), GENERIC_WRITE,
+    hFile = CreateFileW(
+      wfname.c_str(), GENERIC_WRITE,
       FILE_SHARE_READ | FILE_SHARE_DELETE,  // In RocksDb log files are
       // renamed and deleted before
       // they are closed. This enables
@@ -761,7 +844,10 @@ EnvOptions WinEnvIO::OptimizeForManifestWrite(
 // Returns true iff the named directory exists and is a directory.
 bool WinEnvIO::DirExists(const std::string& dname) {
   WIN32_FILE_ATTRIBUTE_DATA attrs;
-  if (GetFileAttributesExA(dname.c_str(), GetFileExInfoStandard, &attrs)) {
+  std::wstring wdname;
+  if (!hosted_env_->convertToUtf16(dname, wdname).ok())
+    return false;
+  if (GetFileAttributesExW(wdname.c_str(), GetFileExInfoStandard, &attrs)) {
     return 0 != (attrs.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY);
   }
   return false;
@@ -1049,6 +1135,31 @@ EnvOptions WinEnv::OptimizeForLogWrite(const EnvOptions& env_options,
 EnvOptions WinEnv::OptimizeForManifestWrite(
   const EnvOptions& env_options) const {
   return winenv_io_.OptimizeForManifestWrite(env_options);
+}
+
+Status WinEnv::convertToUtf16(const std::string & s, std::wstring & ans) const
+{
+  const DWORD acp = CP_THREAD_ACP;
+  const DWORD flags = MB_PRECOMPOSED | MB_ERR_INVALID_CHARS;
+  unsigned int insize = static_cast<unsigned int>(s.size());
+  int size = MultiByteToWideChar(acp, flags, s.c_str(), insize, NULL, 0);
+  if (size == 0) {
+    DWORD err = GetLastError();
+    // TODO, better choice of error?
+    return Status::InvalidArgument();
+  }
+  wchar_t * wstr = new wchar_t[size];
+  MultiByteToWideChar(acp, flags, s.c_str(), insize, wstr, size);
+  ans = wstr;
+  delete[] wstr;
+  return Status::OK();
+}
+
+Status WinEnvW::convertToUtf16(const std::string & s, std::wstring & ans) const
+{
+  std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
+  ans = converter.from_bytes(s);
+  return Status::OK();
 }
 
 }  // namespace port

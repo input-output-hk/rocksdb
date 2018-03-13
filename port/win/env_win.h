@@ -68,11 +68,13 @@ private:
 
 };
 
+class WinEnv;
+
 // Designed for inheritance so can be re-used
 // but certain parts replaced
 class WinEnvIO {
 public:
-  explicit WinEnvIO(Env* hosted_env);
+  explicit WinEnvIO(WinEnv* hosted_env);
 
   virtual ~WinEnvIO();
 
@@ -164,7 +166,7 @@ private:
 
   typedef VOID(WINAPI * FnGetSystemTimePreciseAsFileTime)(LPFILETIME);
 
-  Env*            hosted_env_;
+  WinEnv*          hosted_env_;
   size_t          page_size_;
   size_t          allocation_granularity_;
   uint64_t        perf_counter_frequency_;
@@ -275,10 +277,17 @@ public:
   EnvOptions OptimizeForManifestWrite(
     const EnvOptions& env_options) const override;
 
+  virtual Status convertToUtf16(const std::string & s, std::wstring & ans) const;
+
 private:
 
   WinEnvIO      winenv_io_;
   WinEnvThreads winenv_threads_;
+};
+
+class WinEnvW : public WinEnv
+{
+  Status convertToUtf16(const std::string & s, std::wstring & ans) const override;
 };
 
 }
