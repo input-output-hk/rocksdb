@@ -12,6 +12,8 @@
 #include <rocksdb/env.h>
 #include "port/win/env_win.h"
 
+#include <iostream>
+
 namespace rocksdb {
 namespace port {
 
@@ -28,6 +30,7 @@ namespace port {
 namespace {
   std::once_flag winenv_once_flag;
   Env* envptr;
+  std::once_flag winenv_utf8_once_flag;
   Env* envptr_utf8;
 };
 
@@ -41,7 +44,7 @@ Env* Env::Default() {
 
 Env* Env::DefaultUTF8() {
   using namespace port;
-  std::call_once(winenv_once_flag, []() { envptr_utf8 = new WinEnvW(); });
+  std::call_once(winenv_utf8_once_flag, []() { envptr_utf8 = new WinEnvW(); });
   return envptr_utf8;
 }
 

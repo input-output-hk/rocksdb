@@ -24,13 +24,25 @@ struct dirent {
   char d_name[_MAX_PATH]; /* filename */
 };
 
+struct wdirent {
+  wchar_t d_name[_MAX_PATH]; /* filename */
+};
+
 struct DIR;
+
+struct WDIR;
 
 DIR* opendir(const char* name);
 
+WDIR* wopendir(const wchar_t* name);
+
 dirent* readdir(DIR* dirp);
 
+wdirent* wreaddir(WDIR* dirp);
+
 int closedir(DIR* dirp);
+
+int wclosedir(WDIR* dirp);
 
 }  // namespace port
 

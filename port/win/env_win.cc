@@ -37,6 +37,7 @@
 
 #include <Rpc.h>  // For UUID generation
 #include <Windows.h>
+#include <shlwapi.h>
 
 namespace rocksdb {
 
@@ -86,11 +87,14 @@ public:
   virtual bool MoveFileEx(const std::string & src, const std::string & tgt) const = 0;
 
   virtual bool CreateHardLink(const std::string & tgt, const std::string & src) const = 0;
+
+  virtual Status GetChildren(const std::string & dir, std::vector<std::string> * result) const = 0;
+
+  virtual Status GetAbsolutePath(const std::string & db_path, std::string * result) const = 0;
 };
 
 class WinEnvFileIO_native : public WinEnvFileIO {
 public:
-
   bool _unlink(const std::string & fname) const override {
     return ::_unlink(fname.c_str());
   }
@@ -127,7 +131,6 @@ public:
     DWORD shared_mode,
     DWORD creation_disposition,
     DWORD flags) const override {
-    std::cerr << "CreateFileA: \"" << fname << "\" (" << fname.size() << ")" << std::endl;
     return ::CreateFileA(fname.c_str(), desired_access,
       shared_mode, NULL,
       creation_disposition,
@@ -152,6 +155,61 @@ public:
   bool CreateHardLink(const std::string & tgt, const std::string & src) const override {
     return ::CreateHardLinkA(tgt.c_str(), src.c_str(), NULL);
   }
+
+  Status GetChildren(const std::string & dir, std::vector<std::string> * result) const override {
+    std::vector<std::string> output;
+
+    Status status;
+    auto CloseDir = [](DIR* p) { closedir(p); };
+    std::unique_ptr<DIR, decltype(CloseDir)> dirp(opendir(dir.c_str()),
+      CloseDir);
+
+    if (!dirp) {
+      status = IOError(dir, errno);
+    } else {
+      if (result->capacity() > 0) {
+        output.reserve(result->capacity());
+      }
+
+      struct dirent* ent = readdir(dirp.get());
+      while (ent) {
+        output.push_back(ent->d_name);
+        ent = readdir(dirp.get());
+      }
+    }
+
+    output.swap(*result);
+
+    return status;
+  }
+
+  Status GetAbsolutePath(const std::string & db_path,
+    std::string * output_path) const override {
+    // Check if we already have an absolute path
+    // that starts with non dot and has a semicolon in it
+    if ((!db_path.empty() && (db_path[0] == '/' || db_path[0] == '\\')) ||
+      !PathIsRelativeA(db_path.c_str())) {
+      *output_path = db_path;
+      return Status::OK();
+    }
+
+    std::string result;
+    result.resize(MAX_PATH);
+
+    // Hopefully no changes the current directory while we do this
+    // however _getcwd also suffers from the same limitation
+    DWORD len = GetCurrentDirectoryA(MAX_PATH, &result[0]);
+    if (len == 0) {
+      auto lastError = GetLastError();
+      return IOErrorFromWindowsError("Failed to get current working directory",
+        lastError);
+    }
+
+    result.resize(len);
+
+    result.swap(*output_path);
+    return Status::OK();
+  }
 };
 
 class WinEnvFileIO_UTF8_to_UTF16 : public WinEnvFileIO {
@@ -162,7 +220,11 @@ public:
       return converter.from_bytes(s);
   }
 
-
+  std::string fromUtf16(const std::wstring & s) const {
+    std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
+    return converter.to_bytes(s);
+  }
+  
   bool _unlink(const std::string & fname) const override {
     return ::_wunlink(toUtf16(fname).c_str());
   }
@@ -199,9 +261,6 @@ public:
     DWORD shared_mode,
     DWORD creation_disposition,
     DWORD flags) const override {
-    std::cerr << "CreateFileW: \"" << fname << "\" ("
-              << fname.size() << ", "
-              << toUtf16(fname).size() << ")" << std::endl;
     return ::CreateFileW(toUtf16(fname).c_str(), desired_access,
       shared_mode, NULL,
       creation_disposition,
@@ -225,6 +284,67 @@ public:
 
   bool CreateHardLink(const std::string & tgt, const std::string & src) const override {
     return ::CreateHardLinkW(toUtf16(tgt).c_str(), toUtf16(src).c_str(), NULL);
+  }
+
+  Status GetChildren(const std::string & dir, std::vector<std::string> * result) const override {
+    std::vector<std::string> output;
+
+    Status status;
+    auto CloseDir = [](WDIR* p) { wclosedir(p); };
+    std::unique_ptr<WDIR, decltype(CloseDir)> dirp(wopendir(toUtf16(dir).c_str()),
+      CloseDir);
+
+    if (!dirp) {
+      status = IOError(dir, errno);
+    } else {
+      if (result->capacity() > 0) {
+        output.reserve(result->capacity());
+      }
+
+      struct wdirent* ent = wreaddir(dirp.get());
+      while (ent) {
+        output.push_back(fromUtf16(ent->d_name));
+        ent = wreaddir(dirp.get());
+      }
+    }
+
+    output.swap(*result);
+
+    return status;
+  }
+
+  Status GetAbsolutePath(const std::string & db_path_a,
+    std::string * output_path) const override {
+
+    std::wstring db_path = toUtf16(db_path_a);
+    // Check if we already have an absolute path
+    // that starts with non dot and has a semicolon in it
+    if ((!db_path.empty() && (db_path[0] == L'/' || db_path[0] == L'\\')) ||
+      !PathIsRelativeW(db_path.c_str())) {
+      *output_path = db_path_a;
+      return Status::OK();
+    }
+
+    std::wstring result;
+    result.resize(MAX_PATH);
+
+    // Hopefully no changes the current directory while we do this
+    // however _getcwd also suffers from the same limitation
+    DWORD len = GetCurrentDirectoryW(MAX_PATH, &result[0]);
+    if (len == 0) {
+      auto lastError = GetLastError();
+      return IOErrorFromWindowsError("Failed to get current working directory",
+        lastError);
+    }
+
+    result.resize(len);
+
+    std::string result_a = fromUtf16(result);
+    if (result_a.length() > MAX_PATH)
+      result_a.resize(MAX_PATH);
+
+    result_a.swap(*output_path);
+    return Status::OK();
   }
 };
 
@@ -517,31 +637,7 @@ Status WinEnvIO::FileExists(const std::string& fname) {
 
 Status WinEnvIO::GetChildren(const std::string& dir,
   std::vector<std::string>* result) {
-  std::vector<std::string> output;
-
-  Status status;
-
-  auto CloseDir = [](DIR* p) { closedir(p); };
-  std::unique_ptr<DIR, decltype(CloseDir)> dirp(opendir(dir.c_str()),
-    CloseDir);
-
-  if (!dirp) {
-    status = IOError(dir, errno);
-  } else {
-    if (result->capacity() > 0) {
-      output.reserve(result->capacity());
-    }
-
-    struct dirent* ent = readdir(dirp.get());
-    while (ent) {
-      output.push_back(ent->d_name);
-      ent = readdir(dirp.get());
-    }
-  }
-
-  output.swap(*result);
-
-  return status;
+  return fileio_->GetChildren(dir, result);
 }
 
 Status WinEnvIO::CreateDir(const std::string& name) {
@@ -843,29 +939,7 @@ Status WinEnvIO::GetHostName(char* name, uint64_t len) {
 
 Status WinEnvIO::GetAbsolutePath(const std::string& db_path,
   std::string* output_path) {
-  // Check if we already have an absolute path
-  // that starts with non dot and has a semicolon in it
-  if ((!db_path.empty() && (db_path[0] == '/' || db_path[0] == '\\')) ||
-    (db_path.size() > 2 && db_path[0] != '.' &&
-    ((db_path[1] == ':' && db_path[2] == '\\') ||
-    (db_path[1] == ':' && db_path[2] == '/')))) {
-    *output_path = db_path;
-    return Status::OK();
-  }
-
-  std::string result;
-  result.resize(_MAX_PATH);
-
-  char* ret = _getcwd(&result[0], _MAX_PATH);
-  if (ret == nullptr) {
-    return Status::IOError("Failed to get current working directory",
-      strerror(errno));
-  }
-
-  result.resize(strlen(result.data()));
-
-  result.swap(*output_path);
-  return Status::OK();
+  return fileio_->GetAbsolutePath(db_path, output_path);
 }
 
 std::string WinEnvIO::TimeToString(uint64_t secondsSince1970) {

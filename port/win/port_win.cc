@@ -125,6 +125,24 @@ struct DIR {
   }
 };
 
+struct WDIR {
+  intptr_t handle_;
+  bool firstread_;
+  struct _wfinddata64_t data_;
+  wdirent entry_;
+
+  WDIR() : handle_(-1), firstread_(true) {}
+
+  WDIR(const WDIR&) = delete;
+  WDIR& operator=(const WDIR&) = delete;
+
+  ~WDIR() {
+    if (-1 != handle_) {
+      _findclose(handle_);
+    }
+  }
+};
+
 DIR* opendir(const char* name) {
   if (!name || *name == 0) {
     errno = ENOENT;
@@ -143,6 +161,28 @@ DIR* opendir(const char* name) {
   }
 
   strncpy_s(dir->entry_.d_name, dir->data_.name, strlen(dir->data_.name));
+
+  return dir.release();
+}
+
+WDIR* wopendir(const wchar_t* name) {
+  if (!name || *name == 0) {
+    errno = ENOENT;
+    return nullptr;
+  }
+
+  std::wstring pattern(name);
+  pattern.append(L"\\").append(L"*");
+
+  std::unique_ptr<WDIR> dir(new WDIR);
+
+  dir->handle_ = _wfindfirst64(pattern.c_str(), &dir->data_);
+
+  if (dir->handle_ == -1) {
+    return nullptr;
+  }
+
+  wcsncpy_s(dir->entry_.d_name, dir->data_.name, wcslen(dir->data_.name));
 
   return dir.release();
 }
@@ -169,7 +209,34 @@ struct dirent* readdir(DIR* dirp) {
   return &dirp->entry_;
 }
 
+struct wdirent* wreaddir(WDIR* dirp) {
+  if (!dirp || dirp->handle_ == -1) {
+    errno = EBADF;
+    return nullptr;
+  }
+
+  if (dirp->firstread_) {
+    dirp->firstread_ = false;
+    return &dirp->entry_;
+  }
+
+  auto ret = _wfindnext64(dirp->handle_, &dirp->data_);
+
+  if (ret != 0) {
+    return nullptr;
+  }
+
+  wcsncpy_s(dirp->entry_.d_name, dirp->data_.name, wcslen(dirp->data_.name));
+
+  return &dirp->entry_;
+}
+
 int closedir(DIR* dirp) {
+  delete dirp;
+  return 0;
+}
+
+int wclosedir(WDIR* dirp) {
   delete dirp;
   return 0;
 }

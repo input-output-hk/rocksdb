@@ -2163,17 +2163,17 @@ rocksdb_env_t* rocksdb_create_default_env() {
   return result;
 }
 
+rocksdb_env_t* rocksdb_create_default_utf8_env() {
+  rocksdb_env_t* result = new rocksdb_env_t;
+  result->rep = Env::DefaultUTF8();
+  result->is_default = true;
+  return result;
+}
+
 rocksdb_env_t* rocksdb_create_mem_env() {
   rocksdb_env_t* result = new rocksdb_env_t;
   result->rep = rocksdb::NewMemEnv(Env::Default());
   result->is_default = false;
-  return result;
-}
-
-rocksdb_env_t* rocksdb_create_utf8_env() {
-  rocksdb_env_t* result = new rocksdb_env_t;
-  result->rep = Env::DefaultUTF8();
-  result->is_default = true;
   return result;
 }
 
