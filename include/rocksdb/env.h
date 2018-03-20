@@ -129,6 +129,12 @@ class Env {
   // The result of Default() belongs to rocksdb and must never be deleted.
   static Env* Default();
 
+  // Return a default environment suitable for the current operating
+  // system, expecting paths to be encoded as UTF-8.
+  //
+  // The result of DefaultUTF8() belongs to rocksdb and must never be deleted.
+  static Env* DefaultUTF8();
+
   // Create a brand new sequentially-readable file with the specified name.
   // On success, stores a pointer to the new file in *result and returns OK.
   // On failure stores nullptr in *result and returns non-OK.  If the file does

@@ -872,4 +872,11 @@ Env* Env::Default() {
   return &default_env;
 }
 
+//
+// Default Posix Env for UTF-8
+//
+Env* Env::DefaultUTF8() {
+  return Env::Default();
+}
+
 }  // namespace rocksdb

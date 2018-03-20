@@ -863,6 +863,7 @@ extern ROCKSDB_LIBRARY_API void rocksdb_cache_set_capacity(
 
 extern ROCKSDB_LIBRARY_API rocksdb_env_t* rocksdb_create_default_env();
 extern ROCKSDB_LIBRARY_API rocksdb_env_t* rocksdb_create_mem_env();
+extern ROCKSDB_LIBRARY_API rocksdb_env_t* rocksdb_create_utf8_env();
 extern ROCKSDB_LIBRARY_API void rocksdb_env_set_background_threads(
     rocksdb_env_t* env, int n);
 extern ROCKSDB_LIBRARY_API void

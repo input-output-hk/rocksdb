@@ -68,13 +68,14 @@ private:
 
 };
 
-class WinEnv;
+// Mixin to provide access to A or W Windows file APIs
+class WinEnvFileIO;
 
 // Designed for inheritance so can be re-used
 // but certain parts replaced
 class WinEnvIO {
 public:
-  explicit WinEnvIO(WinEnv* hosted_env);
+  explicit WinEnvIO(Env* hosted_env, WinEnvFileIO* fileio = NULL);
 
   virtual ~WinEnvIO();
 
@@ -153,7 +154,7 @@ public:
 
   virtual EnvOptions OptimizeForManifestWrite(
     const EnvOptions& env_options) const;
-
+  
   size_t GetPageSize() const { return page_size_; }
 
   size_t GetAllocationGranularity() const { return allocation_granularity_; }
@@ -166,16 +167,19 @@ private:
 
   typedef VOID(WINAPI * FnGetSystemTimePreciseAsFileTime)(LPFILETIME);
 
-  WinEnv*          hosted_env_;
+  Env*            hosted_env_;
   size_t          page_size_;
   size_t          allocation_granularity_;
   uint64_t        perf_counter_frequency_;
   FnGetSystemTimePreciseAsFileTime GetSystemTimePreciseAsFileTime_;
+  unique_ptr<WinEnvFileIO> fileio_;
 };
 
 class WinEnv : public Env {
 public:
   WinEnv();
+
+  WinEnv(WinEnvFileIO* fileio);
 
   ~WinEnv();
 
@@ -277,8 +281,6 @@ public:
   EnvOptions OptimizeForManifestWrite(
     const EnvOptions& env_options) const override;
 
-  virtual Status convertToUtf16(const std::string & s, std::wstring & ans) const;
-
 private:
 
   WinEnvIO      winenv_io_;
@@ -287,7 +289,8 @@ private:
 
 class WinEnvW : public WinEnv
 {
-  Status convertToUtf16(const std::string & s, std::wstring & ans) const override;
+public:
+  WinEnvW();
 };
 
 }

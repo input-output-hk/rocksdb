@@ -2170,6 +2170,13 @@ rocksdb_env_t* rocksdb_create_mem_env() {
   return result;
 }
 
+rocksdb_env_t* rocksdb_create_utf8_env() {
+  rocksdb_env_t* result = new rocksdb_env_t;
+  result->rep = Env::DefaultUTF8();
+  result->is_default = true;
+  return result;
+}
+
 void rocksdb_env_set_background_threads(rocksdb_env_t* env, int n) {
   env->rep->SetBackgroundThreads(n);
 }

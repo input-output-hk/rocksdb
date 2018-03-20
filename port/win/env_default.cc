@@ -28,15 +28,21 @@ namespace port {
 namespace {
   std::once_flag winenv_once_flag;
   Env* envptr;
+  Env* envptr_utf8;
 };
 
 }
 
 Env* Env::Default() {
   using namespace port;
-  // std::call_once(winenv_once_flag, []() { envptr = new WinEnv(); });
-  std::call_once(winenv_once_flag, []() { envptr = new WinEnvW(); });
+  std::call_once(winenv_once_flag, []() { envptr = new WinEnv(); });
   return envptr;
+}
+
+Env* Env::DefaultUTF8() {
+  using namespace port;
+  std::call_once(winenv_once_flag, []() { envptr_utf8 = new WinEnvW(); });
+  return envptr_utf8;
 }
 
 }
