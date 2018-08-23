@@ -38,7 +38,7 @@ namespace {
 
 Env* Env::Default() {
   using namespace port;
-  std::call_once(winenv_once_flag, []() { envptr = new WinEnv(); });
+  std::call_once(winenv_once_flag, []() { envptr = new WinEnvW(); });
   return envptr;
 }
 
@@ -49,4 +49,3 @@ Env* Env::DefaultUTF8() {
 }
 
 }
-
