@@ -164,7 +164,7 @@ DBOptions::DBOptions()
       create_missing_column_families(false),
       error_if_exists(false),
       paranoid_checks(true),
-      env(Env::Default()),
+      env(Env::DefaultUTF8()),
       rate_limiter(nullptr),
       sst_file_manager(nullptr),
       info_log(nullptr),
